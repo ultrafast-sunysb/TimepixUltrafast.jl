@@ -72,7 +72,7 @@ end
 # electron-ion corrected coincidences in cartesian coordinates
 # returns corrected coincidences of electrons at x,y with number of ions
 function ei_car_corr_coin(ele::DataFrame, ion::DataFrame;
-    bin_range = (0:255, 0:255)
+    bin_range = (0:255, 0:255), simple_bg = false
 )::Matrix
     # background electron hits
     bg_task = @spawn ei_car_coin_background(ele, ion, bin_range)
@@ -82,14 +82,21 @@ function ei_car_corr_coin(ele::DataFrame, ion::DataFrame;
     bg_shots, bg = fetch(bg_task)
     meas_shots, meas = fetch(meas_task)
     # now "subtract" the background
-    # (poisson and binomial are about the same, but poisson will allow you to
-    # have more than 1 hit per shot)
-    #return estimate_signal.(Binomial.(meas_shots, bg ./ bg_shots), meas)
-    #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
-    return (
-        estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
-        ./ (ele.shot[end] - ele.shot[1] + 1)
-    )
+    if simple_bg
+        return (
+            (meas - bg * (meas_shots / bg_shots))
+            ./ (ele.shot[end] - ele.shot[1] + 1)
+        )
+    else
+        # (poisson and binomial are about the same, but poisson will allow you
+        # to have more than 1 hit per shot)
+        #return estimate_signal.(Binomial.(meas_shots, bg ./ bg_shots), meas)
+        #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
+        return (
+            estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
+            ./ (ele.shot[end] - ele.shot[1] + 1)
+        )
+    end
 end
 
 
@@ -161,17 +168,25 @@ end
 
 # electron-ion corrected coincidences in radius
 # returns corrected coincidences of electrons at r with number of ions
-function ei_r_corr_coin(ele::DataFrame, ion::DataFrame; bin_range = 0:127
+function ei_r_corr_coin(ele::DataFrame, ion::DataFrame;
+    bin_range = 0:127, simple_bg = false
 )::Vector
     bg_task = @spawn ei_r_coin_background(ele, ion, bin_range)
     meas_task = @spawn ei_r_coin_measurement(ele, ion, bin_range)
     bg_shots, bg = fetch(bg_task)
     meas_shots, meas = fetch(meas_task)
-    #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
-    return (
-        estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
-        ./ (ele.shot[end] - ele.shot[1] + 1)
-    )
+    if simple_bg
+        return (
+            (meas - bg * meas_shots / bg_shots)
+            ./ (ele.shot[end] - ele.shot[1] + 1)
+        )
+    else
+        #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
+        return (
+            estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
+            ./ (ele.shot[end] - ele.shot[1] + 1)
+        )
+    end
 end
 
 
