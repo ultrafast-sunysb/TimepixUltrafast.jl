@@ -3,7 +3,7 @@ module TimepixUltrafast
 using DataFrames
 using Distributions
 using StatsBase
-import Base.Threads.@threads
+using Base.Threads
 
 export  estimate_signal,
         ei_car_coin_background,

@@ -26,7 +26,7 @@ function ei_car_coin_background(ele::DataFrame, ion::DataFrame,
     background = zeros(UInt64, size(bin_range[1])[1], size(bin_range[2])[1])
     shots_without_ion = 0
     last_shot = -1
-    @threads for ele_hit_idx in 1:size(ele)[1]
+    for ele_hit_idx in 1:size(ele)[1]
         if !insorted(ele[ele_hit_idx, :shot], ion.shot)
             x = searchsortedlast(bin_range[1], ele[ele_hit_idx, :x])
             y = searchsortedlast(bin_range[2], ele[ele_hit_idx, :y])
@@ -50,7 +50,7 @@ function ei_car_coin_measurement(ele::DataFrame, ion::DataFrame,
     # iterate over ion hits and count corrected coincidences
     shots_with_ion = 0
     last_shot = -1
-    @threads for ion_hit_idx in 1:size(ion)[1]
+    for ion_hit_idx in 1:size(ion)[1]
         # get indices of electron hits (assumes shot index is monotonic)
         ele_hit_idxs = searchsorted(ele.shot, ion[ion_hit_idx, :shot])
         if ele_hit_idxs.stop >= ele_hit_idxs.start
@@ -74,12 +74,16 @@ end
 function ei_car_corr_coin(ele::DataFrame, ion::DataFrame;
     bin_range = (0:255, 0:255)
 )::Matrix
-    # background electron hits per shot
-    bg_shots, bg = ei_car_coin_background(ele, ion, bin_range)
+    # background electron hits
+    bg_task = @spawn ei_car_coin_background(ele, ion, bin_range)
     # sum of measured electron hits
-    meas_shots, meas = ei_car_coin_measurement(ele, ion, bin_range)
-    # now "subtract" the background (poisson and binomial are about the same,
-    # but poisson will allow you to have more than 1 hit per shot)
+    meas_task = @spawn ei_car_coin_measurement(ele, ion, bin_range)
+    # join threads
+    bg_shots, bg = fetch(bg_task)
+    meas_shots, meas = fetch(meas_task)
+    # now "subtract" the background
+    # (poisson and binomial are about the same, but poisson will allow you to
+    # have more than 1 hit per shot)
     #return estimate_signal.(Binomial.(meas_shots, bg ./ bg_shots), meas)
     #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
     return (
@@ -117,7 +121,7 @@ function ei_r_coin_background(ele::DataFrame, ion::DataFrame, bin_range = 0:127
     background = zeros(UInt64, size(bin_range)[1])
     shots_without_ion = 0
     last_shot = -1
-    @threads for ele_hit_idx in 1:size(ele)[1]
+    for ele_hit_idx in 1:size(ele)[1]
         if !insorted(ele[ele_hit_idx, :shot], ion.shot)
             background[searchsortedlast(bin_range, ele[ele_hit_idx, :r])] += 1
             if ele[ele_hit_idx, :shot] > last_shot
@@ -136,7 +140,7 @@ function ei_r_coin_measurement(ele::DataFrame, ion::DataFrame, bin_range = 0:127
     # iterate over ion hits and count corrected coincidences
     shots_with_ion = 0
     last_shot = -1
-    @threads for ion_hit_idx in 1:size(ion)[1]
+    for ion_hit_idx in 1:size(ion)[1]
         # get indices of electron hits (assumes shot index is monotonic)
         ele_hit_idxs = searchsorted(ele.shot, ion[ion_hit_idx, :shot])
         if ele_hit_idxs.stop >= ele_hit_idxs.start
@@ -159,8 +163,10 @@ end
 # returns corrected coincidences of electrons at r with number of ions
 function ei_r_corr_coin(ele::DataFrame, ion::DataFrame; bin_range = 0:127
 )::Vector
-    bg_shots, bg = ei_r_coin_background(ele, ion, bin_range)
-    meas_shots, meas = ei_r_coin_measurement(ele, ion, bin_range)
+    bg_task = @spawn ei_r_coin_background(ele, ion, bin_range)
+    meas_task = @spawn ei_r_coin_measurement(ele, ion, bin_range)
+    bg_shots, bg = fetch(bg_task)
+    meas_shots, meas = fetch(meas_task)
     #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
     return (
         estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
