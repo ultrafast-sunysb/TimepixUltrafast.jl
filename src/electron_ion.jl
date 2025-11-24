@@ -42,8 +42,37 @@ end
 
 
 # iterate over electron hits *with* ion hits to calculate the number of shots
-# withion, and histogram of these electron hits
+# with ion, and histogram of these electron hits
 function ei_car_coin_measurement(ele::DataFrame, ion::DataFrame,
+    bin_range = (0:255, 0:255)
+)::Tuple{UInt64, Matrix{UInt64}}
+    measurement = zeros(UInt64, size(bin_range[1])[1], size(bin_range[2])[1])
+    # iterate over ion hits and count corrected coincidences
+    shots_with_ion = 0
+    last_shot = -1
+    for ion_hit_idx in 1:size(ion)[1]
+        # get indices of electron hits (assumes shot index is monotonic)
+        ele_hit_idxs = searchsorted(ele.shot, ion[ion_hit_idx, :shot])
+        if ele_hit_idxs.stop >= ele_hit_idxs.start
+            if ion[ion_hit_idx, :shot] > last_shot
+                last_shot = ion[ion_hit_idx, :shot]
+                shots_with_ion += 1
+                for ele_hit_idx in ele_hit_idxs
+                    x = searchsortedlast(bin_range[1], ele[ele_hit_idx, :x])
+                    y = searchsortedlast(bin_range[2], ele[ele_hit_idx, :y])
+                    measurement[x, y] += 1
+                end
+            end
+        end
+    end
+    return (shots_with_ion, measurement)
+end
+
+
+# iterate over electron hits *with* ion hits to calculate the number of shots
+# with ion, and histogram of these electron hits
+# (+N version)
+function ei_car_coiN_measurement(ele::DataFrame, ion::DataFrame,
     bin_range = (0:255, 0:255)
 )::Tuple{UInt64, Matrix{UInt64}}
     measurement = zeros(UInt64, size(bin_range[1])[1], size(bin_range[2])[1])
@@ -83,9 +112,10 @@ function ei_car_corr_coin(ele::DataFrame, ion::DataFrame;
     meas_shots, meas = fetch(meas_task)
     # now "subtract" the background
     if simple_bg
-        return (
+        return clamp.(
             (meas - bg * (meas_shots / bg_shots))
-            ./ (ele.shot[end] - ele.shot[1] + 1)
+            ./ (ele.shot[end] - ele.shot[1] + 1),
+            0, Inf
         )
     else
         # (poisson and binomial are about the same, but poisson will allow you
@@ -114,7 +144,7 @@ function ei_car_kovariance(ele::DataFrame, ion::DataFrame;
     )
     bg_hist = fit(Histogram, (ele.x, ele.y), edges)
     meas_shot_hist = fit(Histogram, ion.shot, ion.shot[1]:ion.shot[end])
-    meas_shots, meas = ei_car_coin_measurement(ele, ion, bin_range)
+    meas_shots, meas = ei_car_coiN_measurement(ele, ion, bin_range)
     return clamp.(
         meas / sum(meas_shot_hist.weights)
         - bg_hist.weights / length(unique(ele.shot)),
@@ -151,6 +181,32 @@ function ei_r_coin_measurement(ele::DataFrame, ion::DataFrame, bin_range = 0:127
         # get indices of electron hits (assumes shot index is monotonic)
         ele_hit_idxs = searchsorted(ele.shot, ion[ion_hit_idx, :shot])
         if ele_hit_idxs.stop >= ele_hit_idxs.start
+            if ion[ion_hit_idx, :shot] > last_shot
+                last_shot = ion[ion_hit_idx, :shot]
+                shots_with_ion += 1
+                for ele_hit_idx in ele_hit_idxs
+                    measurement[
+                        searchsortedlast(bin_range, ele[ele_hit_idx, :r])
+                    ] += 1
+                end
+            end
+        end
+    end
+    return (shots_with_ion, measurement)
+end
+
+
+# (+N version)
+function ei_r_coiN_measurement(ele::DataFrame, ion::DataFrame, bin_range = 0:127
+)::Tuple{UInt64, Vector{UInt64}}
+    measurement = zeros(UInt64, size(bin_range)[1])
+    # iterate over ion hits and count corrected coincidences
+    shots_with_ion = 0
+    last_shot = -1
+    for ion_hit_idx in 1:size(ion)[1]
+        # get indices of electron hits (assumes shot index is monotonic)
+        ele_hit_idxs = searchsorted(ele.shot, ion[ion_hit_idx, :shot])
+        if ele_hit_idxs.stop >= ele_hit_idxs.start
             for ele_hit_idx in ele_hit_idxs
                 measurement[
                     searchsortedlast(bin_range, ele[ele_hit_idx, :r])
@@ -176,9 +232,10 @@ function ei_r_corr_coin(ele::DataFrame, ion::DataFrame;
     bg_shots, bg = fetch(bg_task)
     meas_shots, meas = fetch(meas_task)
     if simple_bg
-        return (
+        return clamp.(
             (meas - bg * meas_shots / bg_shots)
-            ./ (ele.shot[end] - ele.shot[1] + 1)
+            ./ (ele.shot[end] - ele.shot[1] + 1),
+            0, Inf
         )
     else
         #return estimate_signal.(Poisson.(bg .* (meas_shots / bg_shots)), meas)
@@ -196,7 +253,7 @@ function ei_r_kovariance(ele::DataFrame, ion::DataFrame; bin_range = 0:127
     edges = (bin_range[1]):(step(bin_range)):(bin_range[end] + step(bin_range))
     bg_hist = fit(Histogram, ele.r, edges)
     meas_shot_hist = fit(Histogram, ion.shot, ion.shot[1]:ion.shot[end])
-    meas_shots, meas = ei_r_coin_measurement(ele, ion, bin_range)
+    meas_shots, meas = ei_r_coiN_measurement(ele, ion, bin_range)
     return (
         meas / sum(meas_shot_hist.weights)
         - bg_hist.weights / length(unique(ele.shot))
